@@ -16,6 +16,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define RS232_BAUD 512000
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -38,7 +39,7 @@ char trans_str[100];
 uint16_t trans_len=0;
 uint8_t rx_buff[20];
 uint16_t rx_len=0;
-uint16_t speen_indx=6;
+uint16_t speen_indx=0;
 
 struct speed_
 {
@@ -52,16 +53,25 @@ struct speed_
 
 {"10kbit/s",500,CAN_BS1_13TQ,CAN_BS2_2TQ},
 {"20kbit/s",250,CAN_BS1_13TQ,CAN_BS2_2TQ},
+{"31.25kbit/s",160,CAN_BS1_13TQ,CAN_BS2_2TQ},
+{"33kbit/s",303,CAN_BS1_6TQ,CAN_BS2_1TQ},
+{"40kbit/s",125,CAN_BS1_13TQ,CAN_BS2_2TQ},
 {"50kbit/s",100,CAN_BS1_13TQ,CAN_BS2_2TQ},
+{"80kbit/s",100,CAN_BS1_8TQ,CAN_BS2_1TQ},
 {"83.33kbit/s",60,CAN_BS1_13TQ,CAN_BS2_2TQ},
+{"100kbit/s",50,CAN_BS1_13TQ,CAN_BS2_2TQ},
 {"125kbit/s",40,CAN_BS1_13TQ,CAN_BS2_2TQ},
 {"250kbit/s",20,CAN_BS1_13TQ,CAN_BS2_2TQ},
 {"500kbit/s",10,CAN_BS1_13TQ,CAN_BS2_2TQ},
 {"800kbit/s",10,CAN_BS1_8TQ,CAN_BS2_1TQ},
 {"1mbit/s",5,CAN_BS1_13TQ,CAN_BS2_2TQ},
-{"10mbit/s",1,CAN_BS1_6TQ,CAN_BS2_1TQ}};
+{"10mbit/s",1,CAN_BS1_6TQ,CAN_BS2_1TQ}
 
+};
 
+#define CANHACKER_SERIAL_RESPONSE     "N0001\r"
+#define CANHACKER_SW_VERSION_RESPONSE "v0107\r"
+#define CANHACKER_VERSION_RESPONSE    "V1010\r"
 
 char stack_hostToMK[100*8];
 unsigned int stack_in;
@@ -96,9 +106,9 @@ void PrintCANRxMessage(CAN_RxHeaderTypeDef *RxHeader_loc, uint8_t *RxData_loc)
   {
      len+=snprintf(trans_str+len,sizeof(trans_str)-len,"\r\n");
   }
- // HAL_UART_Transmit(&huart4, (uint8_t*)trans_str, strlen(trans_str), 100);
+  HAL_UART_Transmit(&huart4, (uint8_t*)trans_str, len, 10);
   
-    stk_push_mas(&HostToMK,trans_str,strlen(trans_str));
+   // stk_push_mas(&HostToMK,(u8*)trans_str,strlen(trans_str));
 
   
 //  HAL_UART_Transmit(&huart4, (uint8_t*)RxHeader_loc, sizeof(CAN_RxHeaderTypeDef), 100);
@@ -147,6 +157,7 @@ void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   uint16_t num_bytes=0;
+  char tx[10],tx_transm,fl=0;
   
   trans_str[trans_len++]=rx_buff[rx_len];
     rx_len++;
@@ -158,24 +169,31 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     switch(rx_buff[0])
       {
       case 'V':
-       num_bytes = snprintf((char*)rx_buff,sizeof(rx_buff),"V1010\r");
+       tx_transm = snprintf((char*)tx,sizeof(tx),CANHACKER_VERSION_RESPONSE);
       break;
 
       case 'v':
-       num_bytes = snprintf((char*)rx_buff,sizeof(rx_buff),"v1010\r");
+       tx_transm = snprintf((char*)tx,sizeof(tx),CANHACKER_SW_VERSION_RESPONSE);
       break;
-       case 'C':
-       num_bytes = snprintf((char*)rx_buff,sizeof(rx_buff),"\x07\r");
-      break;
+//      case 0x43://'C':
+//       tx_transm = snprintf((char*)tx,sizeof(tx),"\x07\r");
+//      break;
 
       default:
-        num_bytes = snprintf((char*)rx_buff,sizeof(rx_buff),"\r");
+        tx_transm = snprintf((char*)tx,sizeof(tx),"\r");
+        fl=1;
       break;
       }
-
-   stk_push_mas(&HostToMK,rx_buff,num_bytes);
-   memcpy(trans_str+trans_len,rx_buff,num_bytes);
-   trans_len+=num_bytes;
+    
+     HAL_UART_Transmit(huart, (uint8_t*)tx, tx_transm, 1);
+    if(fl)
+    {
+        HAL_UART_Transmit(huart, "17FF80101010101010101\r", 22, 1);
+      
+    }
+//   stk_push_mas(&HostToMK,rx_buff,num_bytes);
+   memcpy(trans_str+trans_len,tx,tx_transm);
+   trans_len+=tx_transm;
    rx_len=0;
   }
    HAL_UART_Receive_IT(&huart4, rx_buff+rx_len, 1); //You need to toggle a breakpoint on this line!
@@ -236,7 +254,7 @@ int main(void)
   
   /* USER CODE BEGIN 2 */
   TxHeader.StdId = 0x0378;
-  TxHeader.ExtId = 0;
+  TxHeader.ExtId = 0x0378;
   TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
   TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
   TxHeader.DLC = 8;
@@ -252,7 +270,6 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  
   HAL_UART_Receive_IT (&huart4, rx_buff, 1);
   rx_len=0;
   
@@ -270,7 +287,7 @@ int main(void)
    {
      buf_inp_len=stk_pop_mas(&HostToMK,buf,sizeof(buf));    
      if(buf_inp_len>0)
-       HAL_UART_Transmit(&huart4, (uint8_t*)buf, buf_inp_len, 100);
+       HAL_UART_Transmit(&huart4, (uint8_t*)buf, buf_inp_len, 500);
      else 
        break;
                      
@@ -306,23 +323,16 @@ void SystemClock_Config(void)
     Error_Handler();
   }
 
-  /** Configure LSE Drive Capability
-  */
-  HAL_PWR_EnableBkUpAccess();
-  __HAL_RCC_LSEDRIVE_CONFIG(RCC_LSEDRIVE_LOW);
-
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSE|RCC_OSCILLATORTYPE_MSI;
-  RCC_OscInitStruct.LSEState = RCC_LSE_ON;
-  RCC_OscInitStruct.MSIState = RCC_MSI_ON;
-  RCC_OscInitStruct.MSICalibrationValue = 0;
-  RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
   RCC_OscInitStruct.PLL.PLLM = 1;
-  RCC_OscInitStruct.PLL.PLLN = 40;
+  RCC_OscInitStruct.PLL.PLLN = 10;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV7;
   RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
   RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
@@ -344,10 +354,6 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-
-  /** Enable MSI Auto calibration
-  */
-  HAL_RCCEx_EnableMSIPLLMode();
 }
 
 /**
@@ -366,13 +372,13 @@ static void MX_CAN1_Init(void)
   /* USER CODE BEGIN CAN1_Init 1 */
   /* USER CODE END CAN1_Init 1 */
   hcan1.Instance = CAN1;
-  hcan1.Init.Prescaler = 10;
+  hcan1.Init.Prescaler = 500;
   hcan1.Init.Mode = CAN_MODE_NORMAL;
   hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
   hcan1.Init.TimeSeg1 = CAN_BS1_13TQ;
   hcan1.Init.TimeSeg2 = CAN_BS2_2TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
-  hcan1.Init.AutoBusOff = ENABLE;
+  hcan1.Init.AutoBusOff = DISABLE;
   hcan1.Init.AutoWakeUp = DISABLE;
   hcan1.Init.AutoRetransmission = DISABLE;
   hcan1.Init.ReceiveFifoLocked = DISABLE;
@@ -424,7 +430,7 @@ static void MX_CAN1_Init(void)
   {
     char tmp_buf[50];
     int buf_len=0;
-    snprintf(tmp_buf,sizeof(tmp_buf),"Set speed %s\r\n",speed_settings[speen_indx].name);
+    snprintf(tmp_buf,sizeof(tmp_buf),"\r\nSet speed %s\r\n",speed_settings[speen_indx].name);
     stk_push_mas(&HostToMK,tmp_buf,strlen(tmp_buf));
     
     HAL_CAN_Start(&hcan1);
@@ -448,7 +454,7 @@ static void MX_UART4_Init(void)
   /* USER CODE BEGIN UART4_Init 1 */
   /* USER CODE END UART4_Init 1 */
   huart4.Instance = UART4;
-  huart4.Init.BaudRate = 115200;
+  huart4.Init.BaudRate = RS232_BAUD;// 115200;// 256000;//9600;//115200;
   huart4.Init.WordLength = UART_WORDLENGTH_8B;
   huart4.Init.StopBits = UART_STOPBITS_1;
   huart4.Init.Parity = UART_PARITY_NONE;

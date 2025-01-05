@@ -1,4 +1,6 @@
-#include "stack_pr.h"
+#include "stack_pr.h"4
+#include "stm32l4xx_hal.h"
+//#include <cmsis_iccarm.h> // Для работы с PRIMASK
 
 
 #define EINVAL 1
@@ -14,9 +16,9 @@ int stk_init(h_stack hstack, void* pmem, u32 nsize)
 
     hstack->nSize = nsize;
     hstack->nVol = 0;
-    hstack->pHead = pmem;
-    hstack->pPush = pmem;
-    hstack->pPop = pmem;
+    hstack->pHead =(volatile u8*) pmem;
+    hstack->pPush = (volatile u8*)pmem;
+    hstack->pPop = (volatile u8*)pmem;
     hstack->pTail = (u8*) pmem + nsize;
 
     return 0;
@@ -35,30 +37,41 @@ void  _len (h_stack hstack, u16* len);
 
 void /*__SWI_14*/_push(h_stack hstack, u8 byte)
 {
-    *(hstack->pPush) = byte;
+  uint32_t primask = __get_PRIMASK();  // Сохраняем текущее состояние
+    __set_PRIMASK(1);                   // Устанавливаем PRIMASK = 1 (запрет прерываний) 
+   
+  *(hstack->pPush) = byte;
     hstack->pPush++;
 
     hstack->nVol++;
 
     if (hstack->pPush >= hstack->pTail)
         hstack->pPush = hstack->pHead;
+     __set_PRIMASK(primask);             // Восстанавливаем состояние
 }
 //--------------------------------------------------------------------------------
 
 void /*__SWI_15*/_pop(h_stack hstack, u8* pbyte)
 {
-    *pbyte = *(hstack->pPop);
+  uint32_t primask = __get_PRIMASK();  // Сохраняем текущее состояние
+    __set_PRIMASK(1);                   // Устанавливаем PRIMASK = 1 (запрет прерываний) 
+    
+  *pbyte = *(hstack->pPop);
     hstack->pPop++;
 
     hstack->nVol--;
 
     if (hstack->pPop >= hstack->pTail)
         hstack->pPop = hstack->pHead;
+     __set_PRIMASK(primask);             // Восстанавливаем состояние
 }
 
 void /*__SWI_17*/ _len(h_stack hstack, u16 *len)
 {
-    (*len) = hstack->nVol;
+ uint32_t primask = __get_PRIMASK();  // Сохраняем текущее состояние
+    __set_PRIMASK(1);                   // Устанавливаем PRIMASK = 1 (запрет прерываний)   
+  (*len) = hstack->nVol;
+        __set_PRIMASK(primask);             // Восстанавливаем состояние
 }
 
 //--------------------------------------------------------------------------------
